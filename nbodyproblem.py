@@ -5,11 +5,11 @@ from matplotlib.animation import FuncAnimation
 from matplotlib import colors
 
 # constants
-G = 6.67430e-11       # gravitational constant
-dt = 60*60            # time step (s)
-tolerance = 1e-1           # softening length (m)
-scale = 3e11               # scale of plot (m)
-diagnostics_factor = 1e-21 # switches to peta
+G = 6.67430e-11              # gravitational constant
+dt = 60*60*24                # time step (s)
+tolerance = 1e-6             # softening length (m)
+scale = 5e12                 # scale of plot (m)
+diagnostics_factor = 1e-21   # switches to peta to avoid overflow issues
 
 # Body class
 class Body:
@@ -52,6 +52,25 @@ class Body:
         dist = np.linalg.norm(r)
         a = self.radius + other.radius
         return dist <= a
+    
+    # elastic collision between two bodies
+    def elastic_collision(self, other):
+        r = self.rvector - other.rvector
+        dist = np.linalg.norm(r)
+        if dist == 0:
+            r = np.array([1e-6, 0, 0], dtype=np.float64)
+            dist = 1e-6
+            self.rvector += r
+        n = r / dist
+
+        vn = np.dot(self.vvector - other.vvector, n)
+        if vn >= 0:
+            return  # moving apart
+
+        m1, m2 = self.mass, other.mass
+        # Standard 1D collision along normal
+        self.vvector -= 2 * m2 / (m1 + m2) * vn * n
+        other.vvector += 2 * m1 / (m1 + m2) * vn * n
 
 # energy helper function
 # returns energy of a lsit of bodies in J
@@ -85,24 +104,6 @@ def angular_momentum(bodies):
         L += b.get_angular_momentum()
     return L
 
-# elastic collision between two bodies
-def elastic_collision(b1, b2):
-    r = b1.rvector - b2.rvector
-    dist = np.linalg.norm(r)
-    if dist == 0:
-        r = np.array([1e-6, 0, 0], dtype=np.float64)
-        dist = 1e-6
-    n = r / dist
-
-    vn = np.dot(b1.vvector - b2.vvector, n)
-    if vn >= 0:
-        return  # moving apart
-
-    m1, m2 = b1.mass, b2.mass
-    # Standard 1D collision along normal
-    b1.vvector -= 2 * m2 / (m1 + m2) * vn * n
-    b2.vvector += 2 * m1 / (m1 + m2) * vn * n
-
 # compute accelerations for a list of bodies
 def interact(bodies):
     n = len(bodies)
@@ -116,6 +117,8 @@ def interact(bodies):
         accs[i] = a
     return accs
 
+# steps through calculating new positions and velocities of
+# the different bodies, using leapfrog integration
 def step(bodies):
     # leapfrog method of calculation
     accs = interact(bodies)
@@ -140,23 +143,134 @@ def step(bodies):
     for i in range(n):
         for j in range(i+1, n):
             if bodies[i].collision_check(bodies[j]):
-                elastic_collision(bodies[i], bodies[j])
+                print("Collision!")
+                bodies[i].elastic_collision(bodies[j])
                 
 
 # Bodies generator
-N = 100
-colors = plt.cm.tab10(np.arange(N) % 10)  # tab10 has 10 distinct colors
-bodies = []
+'''
+IMPORTANT
+Set the N value to the amount of bodies you wish to simulate
+Even if you are using your own body lsit, and not randomly generated bodies
+This tells the plot how many colros to generate for them
 
-for n in range(N):
-    m = np.random.uniform(1e24, 1e27)
-    r = np.random.uniform(1, 10)
-    theta = 2*np.pi*n/N
-    pos = np.random.uniform(-2.5e11, 2.5e11, 3)
-    pos[2] = 0
-    vel = np.cross(pos, np.array([0,0,7e-8]))
-    # vel = np.random.uniform(-1e2, 2e2, 3)
-    bodies.append(Body(m, r, pos, vel))
+If you're using the random seed method, this tells it how many bodies to generate
+'''
+N = 9
+colors = plt.cm.tab10(np.arange(N) % 10)  # tab10 has 10 distinct colors
+
+# solar system parameters
+
+# rotation matrix helper, angles in radians
+rotation_matrix = lambda theta: np.array([
+    [np.cos(theta), -np.sin(theta), 0],
+    [np.sin(theta), np.cos(theta), 0],
+    [0, 0, 1]
+])
+
+mass_sun = 2e30
+radius_sun = 7e8
+r_sun = np.array([0,0,0])
+v_sun = np.array([0,0,0])
+
+mass_mercury = 3.3e23
+radius_mercury = 2.44e6
+theta_mercury = np.radians(167)
+r_mercury = rotation_matrix(theta_mercury) @ np.array([5.8e10, 0 ,0])
+v_mercury = rotation_matrix(theta_mercury) @ np.array([0, 4.8e4, 0])
+
+mass_venus = 4.9e24
+radius_venus = 6.1e6
+theta_venus = np.radians(15)
+r_venus = rotation_matrix(theta_venus) @ np.array([1.1e11, 0, 0])
+v_venus = rotation_matrix(theta_venus) @ np.array([0, 3.5e4, 0])
+
+mass_earth = 6e24
+radius_earth = 6e6
+r_earth = np.array([1.5e11,0,0])
+v_earth=np.array([0,3e4,0])
+
+mass_mars = 6.4e23
+radius_mars = 3.4e6
+theta_mars = np.radians(8.5)
+r_mars = rotation_matrix(theta_mars) @ np.array([2.3e11, 0, 0])
+v_mars = rotation_matrix(theta_mars) @ np.array([0, 2.4e4, 0])
+
+mass_jupiter = 1.9e27
+radius_jupiter = 7e7
+theta_jupiter = 0.162
+r_jupiter = rotation_matrix(theta_jupiter) @ np.array([7.8e11, 0, 0])
+v_jupiter = rotation_matrix(theta_jupiter) @ np.array([0, 1.3e4, 0])
+
+mass_saturn = 5.7e26
+radius_saturn = 5.8e7
+theta_saturn = np.radians(5.4)
+r_saturn = rotation_matrix(theta_saturn) @ np.array([1.4e12, 0, 0])
+v_saturn = rotation_matrix(theta_saturn) @ np.array([0, 9.7e3, 0])
+
+mass_uranus = 8.7e25
+radius_uranus = 2.6e7
+theta_uranus = np.radians(1.6)
+r_uranus = rotation_matrix(theta_uranus) @ np.array([2.9e12, 0, 0])
+v_uranus = rotation_matrix(theta_uranus) @ np.array([0, 6.8e3, 0])
+
+mass_neptune = 1e26
+radius_neptune = 2.5e7
+theta_neptune = np.radians(1.4)
+r_neptune = rotation_matrix(theta_neptune) @ np.array([4.5e12, 0, 0])
+v_neptune = rotation_matrix(theta_neptune) @ np.array([0, 5.4e3, 0])
+
+# lgrange points
+mass_lagrange = 1
+radius_lagrange = 1
+
+r_lag1 = (1 - (mass_earth / (3 * (mass_earth + mass_sun)))**(1/3)) * r_earth
+v_lag1 = v_earth
+
+r_lag2 = (1 + (mass_earth / (3 * (mass_earth + mass_sun)))**(1/3)) * r_earth
+v_lag2 = v_earth
+
+r_lag3 = -1 * r_earth
+v_lag3 = -1 * v_earth
+
+r_lag4 = rotation_matrix(np.pi / 3) @ r_earth
+v_lag4 = rotation_matrix(np.pi / 3) @ v_earth
+
+r_lag5 = rotation_matrix(-np.pi / 3) @ r_earth
+v_lag5 = rotation_matrix(-np.pi / 3) @ v_earth
+
+bodies = [
+    Body(mass_sun, radius_sun, r_sun, v_sun),
+    Body(mass_mercury, radius_mercury, r_mercury, v_mercury),
+    Body(mass_venus, radius_venus, r_venus, v_venus),
+    Body(mass_earth, radius_earth, r_earth, v_earth),
+    Body(mass_mars, radius_mars, r_mars, v_mars),
+    Body(mass_jupiter, radius_jupiter, r_jupiter, v_jupiter),
+    Body(mass_saturn, radius_saturn, r_saturn, v_saturn),
+    Body(mass_uranus, radius_uranus, r_uranus, v_uranus),
+    Body(mass_neptune, radius_neptune, r_neptune, v_neptune),
+    # Body(mass_lagrange, radius_lagrange, r_lag1, v_lag1),
+    # Body(mass_lagrange, radius_lagrange, r_lag2, v_lag2),
+    # Body(mass_lagrange, radius_lagrange, r_lag3, v_lag3),
+    # Body(mass_lagrange, radius_lagrange, r_lag4, v_lag4),
+    # Body(mass_lagrange, radius_lagrange, r_lag5, v_lag5)
+]
+
+for i, body in enumerate(bodies):
+    print(f"Body{i}: mass: {body.mass / mass_earth:.1e} (Earth masses), distance from origin: {np.linalg.norm(body.rvector) / np.linalg.norm(r_earth):.1e} (AU), phase: {np.arccos(np.dot(body.rvector, np.array([1,0,0]) / np.linalg.norm(body.rvector))):.3e} (rad) velocity: {np.linalg.norm(body.vvector) / np.linalg.norm(v_earth):.1e} (Earth Velocities)")
+
+''''
+Uncomment this, and comment out the bodies[] line to use random bodies
+'''
+# for n in range(N):
+#     m = np.random.uniform(1e24, 1e27)
+#     r = np.random.uniform(1, 10)
+#     theta = 2*np.pi*n/N
+#     pos = np.random.uniform(-2.5e11, 2.5e11, 3)
+#     pos[2] = 0
+#     vel = np.cross(pos, np.array([0,0,3e-8]))
+#     # vel = np.random.uniform(-1e2, 2e2, 3)
+#     bodies.append(Body(m, r, pos, vel))
 
 # initial diagnostics
 E0 = energy(bodies)
@@ -165,7 +279,7 @@ L0 = angular_momentum(bodies)
 print(f"Initial E: {E0:.6e}, |P|: {np.linalg.norm(P0):.6e}, |L|: {np.linalg.norm(L0):.6e}")
 
 # plotting
-fig, (ax_sim, ax_E, ax_P, ax_L) = plt.subplots(4,1, figsize=(7,10))
+fig, ax_sim = plt.subplots(1,1, figsize=(7,10))
 ax_sim.set_xlim(-scale, scale)
 ax_sim.set_ylim(-scale, scale)
 ax_sim.set_aspect('equal')
@@ -173,40 +287,31 @@ scatter = ax_sim.scatter([b.rvector[0] for b in bodies], [b.rvector[1] for b in 
                          s=[np.clip(np.log10(b.mass), 1, 50) for b in bodies],
                          c=colors)
 
-frames, energies, momenta, angulas = [], [], [], []
-line_E, = ax_E.plot([], [], color='blue')
-line_P, = ax_P.plot([], [], color='red')
-line_L, = ax_L.plot([], [], color='green')
-ax_E.set_title("Energy"); ax_P.set_title("Momentum"); ax_L.set_title("Angular Momentum")
+frames = []
+steps = 0
 
 # update each frame
 def update(frame):
+    global steps
     step(bodies)
     xs = [b.rvector[0] for b in bodies]
     ys = [b.rvector[1] for b in bodies]
     scatter.set_offsets(np.c_[xs, ys])
 
-    E = energy(bodies)
-    P = np.linalg.norm(momentum(bodies))
-    L = np.linalg.norm(angular_momentum(bodies))
+    frames.append(frame)
 
-    frames.append(frame); energies.append(E); momenta.append(P); angulas.append(L)
-
-    line_E.set_data(frames, energies)
-    line_P.set_data(frames, momenta)
-    line_L.set_data(frames, angulas)
-
-    ax_E.relim(); ax_E.autoscale_view()
-    ax_P.relim(); ax_P.autoscale_view()
-    ax_L.relim(); ax_L.autoscale_view()
-
-    return scatter, line_E, line_P, line_L
+    steps += 1
+    return scatter
 
 # Run animation
-ani = FuncAnimation(fig, update, frames=200, interval=50, blit=False)
+ani = FuncAnimation(fig, update, frames=3599, interval=10, blit=False, repeat=True) # change repeat to false for data
+# change frames to fit how many dts you want to simulate, currently set to 3599+1 = 3600 dts (dt in day, typically)
 plt.show()
 
 # final diagnostics
+print(f"Final time: {steps * dt / 60 / 60 / 24} Days")
+for i, body in enumerate(bodies):
+    print(f"Body{i}: mass: {body.mass / mass_earth:.1e} (Earth masses), distance from origin: {np.linalg.norm(body.rvector) / np.linalg.norm(r_earth):.1e} (AU), phase: {np.arccos(np.dot(body.rvector, np.array([1,0,0]) / np.linalg.norm(body.rvector))):.3e} (rad) velocity: {np.linalg.norm(body.vvector) / np.linalg.norm(v_earth):.1e} (Earth Velocities)")
 E_final = energy(bodies)
 P_final = momentum(bodies)
 L_final = angular_momentum(bodies)
